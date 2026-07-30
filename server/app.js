@@ -3,7 +3,7 @@ import cors from 'cors'
 import { connectDB } from './config/db.js'
 import consentFormsRouter from './routes/consentForms.js'
 
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/Meeow_Manor'
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/'
 
 const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || '*'
 
