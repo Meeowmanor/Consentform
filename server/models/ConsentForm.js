@@ -10,8 +10,29 @@ const yesNoDetailSchema = new mongoose.Schema(
 
 const consentFormSchema = new mongoose.Schema(
   {
-    ownerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Owner', required: true, index: true },
-    catId: { type: mongoose.Schema.Types.ObjectId, ref: 'Cat', required: true, index: true },
+    guardian: {
+      fullName: { type: String, required: true, trim: true },
+      phoneNumber: { type: String, required: true, trim: true },
+      phoneDigits: { type: String, required: true, trim: true, index: true },
+      alternateNumber: { type: String, trim: true, default: '' },
+      email: { type: String, required: true, trim: true, lowercase: true, index: true },
+      fullAddress: { type: String, required: true, trim: true },
+    },
+
+    cat: {
+      name: { type: String, required: true, trim: true },
+      dateOfBirthOrAge: { type: String, trim: true, default: '' },
+      breed: { type: String, trim: true, default: '' },
+      gender: {
+        male: { type: Boolean, default: false },
+        female: { type: Boolean, default: false },
+        neutered: { type: Boolean, default: false },
+        spayed: { type: Boolean, default: false },
+      },
+      colorMarkings: { type: String, trim: true, default: '' },
+      microchipId: { type: String, trim: true, default: '' },
+      weight: { type: String, trim: true, default: '' },
+    },
 
     veterinary: {
       primaryVeterinarian: { type: String, trim: true, default: '' },

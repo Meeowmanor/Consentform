@@ -2,13 +2,11 @@
 
 Digital boarding intake & consent form. Saves to MongoDB Atlas (`Meeow_Manor`) and applies **₹100 OFF** for first-time guests only.
 
-## Collections
+## Collection
 
 | Collection | Purpose |
 |---|---|
-| `owners` | Parent/guardian; first-time check by email/phone |
-| `cats` | Cat profile |
-| `consent_forms` | Full intake + boarding + pricing |
+| `consent_forms` | Full document: guardian, cat, intake, boarding, pricing, consent. First-time check by email/phone against existing forms. |
 
 ## Local run
 

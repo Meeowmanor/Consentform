@@ -1,6 +1,4 @@
 import { Router } from 'express'
-import { Owner } from '../models/Owner.js'
-import { Cat } from '../models/Cat.js'
 import { ConsentForm } from '../models/ConsentForm.js'
 import {
   STAY_PLANS,
@@ -33,29 +31,21 @@ function yesNoDetail(input = {}) {
   }
 }
 
-async function findExistingOwner(email, phoneNumber) {
+/** Returns true if this email/phone already has a consent form on file. */
+async function hasExistingGuest(email, phoneNumber) {
   const normalizedEmail = normalizeEmail(email)
   const phoneDigits = normalizePhone(phoneNumber)
   const or = []
 
-  if (normalizedEmail) or.push({ email: normalizedEmail })
+  if (normalizedEmail) or.push({ 'guardian.email': normalizedEmail })
   if (phoneDigits) {
-    or.push({ phoneDigits })
-    // legacy records without phoneDigits
-    or.push({ phoneNumber })
+    or.push({ 'guardian.phoneDigits': phoneDigits })
+    or.push({ 'guardian.phoneNumber': phoneNumber })
   }
-  if (!or.length) return null
+  if (!or.length) return false
 
-  const candidates = await Owner.find({ $or: or }).lean()
-  return (
-    candidates.find(
-      (owner) =>
-        (normalizedEmail && owner.email === normalizedEmail) ||
-        (phoneDigits &&
-          (owner.phoneDigits === phoneDigits ||
-            normalizePhone(owner.phoneNumber) === phoneDigits)),
-    ) || null
-  )
+  const existing = await ConsentForm.findOne({ $or: or }).lean()
+  return Boolean(existing)
 }
 
 router.get('/stay-plans', (_req, res) => {
@@ -74,8 +64,7 @@ router.get('/check-guest', async (req, res) => {
       return res.status(400).json({ message: 'Email or phone number is required.' })
     }
 
-    const existing = await findExistingOwner(email, phoneNumber)
-    const isFirstTime = !existing || existing.visitCount === 0
+    const isFirstTime = !(await hasExistingGuest(email, phoneNumber))
 
     res.json({
       isFirstTime,
@@ -93,8 +82,7 @@ router.get('/check-guest', async (req, res) => {
 router.post('/preview-pricing', async (req, res) => {
   try {
     const { email, phoneNumber, stayPlanId, checkInDate, checkOutDate, hours } = req.body
-    const existing = await findExistingOwner(email || '', phoneNumber || '')
-    const isFirstTime = !existing || existing.visitCount === 0
+    const isFirstTime = !(await hasExistingGuest(email || '', phoneNumber || ''))
     const boarding = calculateBoardingTotal({
       stayPlanId,
       checkIn: checkInDate,
@@ -165,8 +153,8 @@ router.post('/', async (req, res) => {
 
     const email = normalizeEmail(guardian.email)
     const phoneNumber = String(guardian.phoneNumber).trim()
-    const existingOwner = await findExistingOwner(email, phoneNumber)
-    const isFirstTime = !existingOwner || existingOwner.visitCount === 0
+    const phoneDigits = normalizePhone(phoneNumber)
+    const isFirstTime = !(await hasExistingGuest(email, phoneNumber))
 
     const boardingCalc = calculateBoardingTotal({
       stayPlanId: boarding.stayPlanId,
@@ -176,53 +164,29 @@ router.post('/', async (req, res) => {
     })
     const priced = applyFirstTimeDiscount(boardingCalc.subtotal, isFirstTime)
 
-    let ownerDoc
-    const phoneDigits = normalizePhone(phoneNumber)
-    if (existingOwner) {
-      ownerDoc = await Owner.findByIdAndUpdate(
-        existingOwner._id,
-        {
-          fullName: guardian.fullName.trim(),
-          phoneNumber,
-          phoneDigits,
-          alternateNumber: String(guardian.alternateNumber || '').trim(),
-          email,
-          fullAddress: guardian.fullAddress.trim(),
-          $inc: { visitCount: 1 },
-        },
-        { new: true },
-      )
-    } else {
-      ownerDoc = await Owner.create({
+    const formDoc = await ConsentForm.create({
+      guardian: {
         fullName: guardian.fullName.trim(),
         phoneNumber,
         phoneDigits,
         alternateNumber: String(guardian.alternateNumber || '').trim(),
         email,
         fullAddress: guardian.fullAddress.trim(),
-        visitCount: 1,
-      })
-    }
-
-    const catDoc = await Cat.create({
-      ownerId: ownerDoc._id,
-      name: cat.name.trim(),
-      dateOfBirthOrAge: String(cat.dateOfBirthOrAge || '').trim(),
-      breed: String(cat.breed || '').trim(),
-      gender: {
-        male: Boolean(cat.gender?.male),
-        female: Boolean(cat.gender?.female),
-        neutered: Boolean(cat.gender?.neutered),
-        spayed: Boolean(cat.gender?.spayed),
       },
-      colorMarkings: String(cat.colorMarkings || '').trim(),
-      microchipId: String(cat.microchipId || '').trim(),
-      weight: String(cat.weight || '').trim(),
-    })
-
-    const formDoc = await ConsentForm.create({
-      ownerId: ownerDoc._id,
-      catId: catDoc._id,
+      cat: {
+        name: cat.name.trim(),
+        dateOfBirthOrAge: String(cat.dateOfBirthOrAge || '').trim(),
+        breed: String(cat.breed || '').trim(),
+        gender: {
+          male: Boolean(cat.gender?.male),
+          female: Boolean(cat.gender?.female),
+          neutered: Boolean(cat.gender?.neutered),
+          spayed: Boolean(cat.gender?.spayed),
+        },
+        colorMarkings: String(cat.colorMarkings || '').trim(),
+        microchipId: String(cat.microchipId || '').trim(),
+        weight: String(cat.weight || '').trim(),
+      },
       veterinary: {
         primaryVeterinarian: String(body.veterinary?.primaryVeterinarian || '').trim(),
         clinicName: String(body.veterinary?.clinicName || '').trim(),
@@ -304,8 +268,6 @@ router.post('/', async (req, res) => {
         ? `Consent form saved. First-time guest discount of ₹${FIRST_TIME_DISCOUNT} applied.`
         : 'Consent form saved. Returning guest — no first-stay discount applied.',
       formId: formDoc._id,
-      ownerId: ownerDoc._id,
-      catId: catDoc._id,
       isFirstTimeGuest: isFirstTime,
       pricing: formDoc.pricing,
     })
@@ -319,8 +281,9 @@ router.get('/', async (_req, res) => {
   try {
     const forms = await ConsentForm.find()
       .sort({ createdAt: -1 })
-      .populate('ownerId', 'fullName phoneNumber email')
-      .populate('catId', 'name breed')
+      .select(
+        'guardian.fullName guardian.phoneNumber guardian.email cat.name cat.breed boarding pricing isFirstTimeGuest createdAt',
+      )
       .lean()
     res.json({ forms })
   } catch (error) {
